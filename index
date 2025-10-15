@@ -1,0 +1,1298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VCE Legal Studiary Revision</title>
+    <!-- Load Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #3b82f6; /* blue-500 */
+            --secondary-color: #10b981; /* emerald-500 */
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom styles for the drawing canvas area */
+        .canvas-container {
+            border: 4px solid var(--primary-color);
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            background-color: white;
+            cursor: crosshair;
+            /* Ensure the container takes up space */
+            min-height: 300px;
+        }
+        #game-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        /* Utility classes for buttons */
+        .btn-primary {
+            @apply bg-blue-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg hover:bg-blue-700 transition duration-150 ease-in-out disabled:bg-gray-400 disabled:shadow-none;
+        }
+        .btn-secondary {
+            @apply bg-emerald-500 text-white font-bold py-2 px-4 rounded-lg shadow-lg hover:bg-emerald-600 transition duration-150 ease-in-out disabled:bg-gray-400 disabled:shadow-none;
+        }
+        /* Tool button styling */
+        .tool-btn {
+            @apply h-8 w-8 rounded-full border-2 border-transparent hover:border-blue-500;
+        }
+        /* Avatar selection highlight */
+        .avatar-selected {
+            box-shadow: 0 0 0 3px var(--secondary-color);
+        }
+        /* Responsive Grid for Game Screen */
+        #game-screen {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+        }
+        @media (min-width: 1024px) {
+            #game-screen {
+                grid-template-columns: 3fr 1fr;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-4 sm:p-8">
+
+    
+    <!-- Firebase SDK Imports (Module type is essential for Firebase v9 in HTML) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, setLogLevel, doc, setDoc, updateDoc, onSnapshot, collection, query, where, getDoc, getDocs, deleteDoc, runTransaction } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // =========================================================================
+        // !!! IMPORTANT: CONFIGURATION FOR LOCAL TESTING !!!
+        // To make this fully functional outside the environment, you MUST replace
+        // the placeholder values in LOCAL_FIREBASE_CONFIG with your actual 
+        // Firebase project credentials (from your Firebase Console).
+        // =========================================================================
+        const LOCAL_FIREBASE_CONFIG = {
+            apiKey: "YOUR_API_KEY_HERE",           // <-- REPLACE ME
+            authDomain: "YOUR_AUTH_DOMAIN_HERE",   // <-- REPLACE ME
+            projectId: "YOUR_PROJECT_ID_HERE",     // <-- REPLACE ME
+            storageBucket: "your-storage-bucket.appspot.com",
+            messagingSenderId: "000000000000",
+            appId: "1:000000000000:web:000000000000000000000"
+        };
+        const LOCAL_APP_ID = LOCAL_FIREBASE_CONFIG.projectId; // Use Project ID as a substitute app ID for local testing
+        // You cannot use a custom auth token outside the environment, so we will use anonymous sign-in instead.
+        const LOCAL_AUTH_TOKEN = null; 
+
+        // --- ENVIRONMENT VARIABLE CHECK ---
+        const envAppId = typeof __app_id !== 'undefined' ? __app_id : null;
+        const envAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        const envFirebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+        
+        let app, db, auth;
+        let userId = 'loading';
+        let firebaseInitialized = false;
+        let isOfflineMode = false; 
+
+        // --- Determine Configuration Source ---
+        let finalAppId;
+        let finalFirebaseConfig;
+        let initialAuthToken; 
+        let isRunningInCanvas = envAppId && envFirebaseConfigString && envAuthToken;
+
+
+        if (isRunningInCanvas) {
+            finalAppId = envAppId;
+            initialAuthToken = envAuthToken;
+            try {
+                finalFirebaseConfig = JSON.parse(envFirebaseConfigString);
+            } catch (e) {
+                console.error("Failed to parse environment Firebase config.");
+                isRunningInCanvas = false; // Fallback to local mode if config is bad
+            }
+        } 
+        
+        if (!isRunningInCanvas) {
+            console.warn("Using Local/Static Firebase Config.");
+            if (LOCAL_FIREBASE_CONFIG.apiKey === "YOUR_API_KEY_HERE") {
+                 // Fallback to local/offline testing if user didn't update config
+                console.error("Static config is not updated. Running in fully OFFLINE/MOCK mode.");
+                isOfflineMode = true;
+            } else {
+                console.log("Using provided static configuration for online mode.");
+            }
+            finalAppId = LOCAL_APP_ID;
+            finalFirebaseConfig = LOCAL_FIREBASE_CONFIG;
+            initialAuthToken = LOCAL_AUTH_TOKEN;
+        }
+
+        // ----------------------------------------------------------------------
+        // VCE Legal Studiary Terms (Units 3 & 4)
+        // ----------------------------------------------------------------------
+        const VCE_TERMS = [
+            // Key Concepts
+            "Separation of Powers", "Division of Powers", "Bicameral Parliament",
+            "Rule of Law", "Ultra Vires", "Referendum", "Representative Government",
+            // Courts and Law-Making
+            "Statutory Interpretation", "Delegated Legislation", "Judicial Precedent",
+            "Ratio Decidendi", "Obiter Dicta", "Stare Decisis", "Court Hierarchy",
+            // Criminal Law
+            "Standard of Proof", "Burden of Proof", "Beyond Reasonable Doubt",
+            "Mandatory Sentencing", "Original Jurisdiction", "Appellate Jurisdiction",
+            "Plea Bargaining", "Bail", "Committal Hearing",
+            // Civil Law
+            "Balance of Probabilities", "Remedies", "Damages", "Injunction",
+            "Mediation", "Conciliation", "Arbitration", "Vcat",
+            // Cases (simplified for drawing)
+            "Mabo Case", "Dietrich v The Queen", "Donoghue v Stevenson", 
+            "High Court of Australia", "Supreme Court of Victoria",
+            "Jury Duty", "Indictable Offence", "Summary Offence",
+        ];
+
+        // ----------------------------------------------------------------------
+        // GAME CLASS
+        // ----------------------------------------------------------------------
+        class PictionaryApp {
+            constructor() {
+                this.isHost = false;
+                this.gameId = '';
+                this.playerName = '';
+                this.playerAvatar = '🧑‍🏫'; // Default
+                this.gameData = {};
+                this.players = [];
+
+                // Drawing state
+                this.isDrawing = false;
+                this.canvas = null;
+                this.ctx = null;
+                this.drawingHistory = [];
+                this.currentStroke = [];
+                this.toolSize = 5;
+                this.toolColor = '#000000';
+                
+                // Game state flags
+                this.guessAttempted = false; 
+                this.timerInterval = null;
+                this.gameUnsubscribe = null;
+                this.playersUnsubscribe = null;
+                this.guessUnsubscribe = null;
+                this.drawingUnsubscribe = null;
+
+                this.setupUI();
+                this.setupFirebase();
+            }
+
+            // --- 1. SETUP ---
+
+            setupUI() {
+                document.getElementById('start-screen').style.display = 'block';
+                document.getElementById('lobby-setup-screen').style.display = 'none';
+                document.getElementById('lobby-screen').style.display = 'none';
+                document.getElementById('game-screen').style.display = 'none';
+
+                // Initial Screen Event Listeners 
+                document.getElementById('host-btn').addEventListener('click', () => this.showLobbySetup(true));
+                document.getElementById('join-btn').addEventListener('click', () => this.showLobbySetup(false));
+                
+                // Buttons are disabled until auth is ready or offline mode is confirmed
+                document.getElementById('host-btn').disabled = true;
+                document.getElementById('join-btn').disabled = true;
+
+                // Lobby Setup Screen Event Listeners
+                document.getElementById('setup-back-btn').addEventListener('click', () => this.resetToStartScreen());
+                document.getElementById('create-join-btn').addEventListener('click', () => this.handleLobbyAction());
+
+                // Game Screen Event Listeners
+                document.getElementById('guess-input')?.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') this.submitGuess();
+                });
+                document.getElementById('guess-btn')?.addEventListener('click', () => this.submitGuess());
+                document.getElementById('select-term-btn')?.addEventListener('click', () => this.showTermSelectionModal());
+                document.getElementById('stop-game-btn')?.addEventListener('click', () => this.stopGame());
+                document.getElementById('player-auth-status').textContent = 'Connecting...';
+            }
+
+            async setupFirebase() {
+                // --- OFFLINE MODE CHECK ---
+                if (isOfflineMode) {
+                    console.warn("Running in Offline/Local Mode: Firebase connection bypassed.");
+                    userId = 'OFFLINE-USER-' + crypto.randomUUID().slice(0, 8);
+                    
+                    // Enable buttons and set status immediately
+                    document.getElementById('host-btn').disabled = false;
+                    document.getElementById('join-btn').disabled = false;
+                    document.getElementById('player-auth-status').classList.remove('text-gray-500');
+                    document.getElementById('player-auth-status').classList.add('text-yellow-700', 'font-bold');
+                    document.getElementById('player-auth-status').textContent = 'Offline Mode (UI Preview Only)';
+                    return; 
+                }
+                // --- END OF OFFLINE MODE CHECK ---
+
+                try {
+                    // 1. Initialize Firebase
+                    app = initializeApp(finalFirebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+                    setLogLevel('debug');
+                    
+                    // Set persistence to session to avoid token expiry issues during long sessions
+                    await setPersistence(auth, browserSessionPersistence);
+                    
+                    firebaseInitialized = true;
+
+                } catch (e) {
+                    console.error("Error initializing Firebase:", e);
+                    this.displayError("Firebase Initialization Failed. Check your configuration.");
+                    document.getElementById('player-auth-status').textContent = 'Error: Init Failed';
+                    return; 
+                }
+
+                // 2. Set up Auth State Listener and Sign In
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("Authenticated with UID:", userId);
+                        
+                        // Enable buttons on the start screen now that auth is ready
+                        document.getElementById('host-btn').disabled = false;
+                        document.getElementById('join-btn').disabled = false;
+                        document.getElementById('player-auth-status').classList.remove('text-gray-500', 'text-red-500', 'text-yellow-700');
+                        document.getElementById('player-auth-status').classList.add('text-green-600', 'font-semibold');
+                        document.getElementById('player-auth-status').textContent = `Ready! User ID: ${userId.slice(0, 8)}...`;
+
+                    } else {
+                        // Attempt to sign in if not already signed in
+                        if (initialAuthToken) {
+                            try {
+                                await signInWithCustomToken(auth, initialAuthToken);
+                            } catch (e) {
+                                console.error("Error signing in with custom token. Attempting anonymous sign-in.", e);
+                                document.getElementById('player-auth-status').textContent = 'Connecting... (Sign-in Error)';
+                                await signInAnonymously(auth);
+                            }
+                        } else {
+                            // Use anonymous sign-in for local execution when no token is available
+                            await signInAnonymously(auth);
+                        }
+                    }
+                });
+            }
+
+            displayError(message) {
+                const errorDiv = document.getElementById('error-message');
+                if (errorDiv) {
+                    errorDiv.textContent = message;
+                    errorDiv.classList.remove('hidden');
+                    // Ensure the error message is visible for a few seconds
+                    setTimeout(() => errorDiv.classList.add('hidden'), 7000);
+                }
+            }
+
+            // --- 2. LOBBY MANAGEMENT ---
+
+            showLobbySetup(isHost) {
+                this.isHost = isHost;
+                
+                // FIX: Check for element existence before accessing properties
+                const startScreen = document.getElementById('start-screen');
+                const setupScreen = document.getElementById('lobby-setup-screen');
+                if (startScreen) startScreen.style.display = 'none';
+                if (setupScreen) setupScreen.style.display = 'block';
+
+                const roleText = isHost ? 'Create New Game' : 'Join Existing Game';
+                
+                const setupTitle = document.getElementById('setup-title');
+                if (setupTitle) setupTitle.textContent = roleText;
+                
+                const gameIdInput = document.getElementById('game-id-input');
+                if (gameIdInput) {
+                    gameIdInput.placeholder = isHost ? 'Auto-generated ID' : 'Enter Game ID';
+                    gameIdInput.disabled = isHost;
+                    gameIdInput.value = isHost ? '' : ''; // Clear existing ID for clarity
+                }
+                
+                const createJoinBtn = document.getElementById('create-join-btn');
+                if (createJoinBtn) createJoinBtn.textContent = isHost ? 'Create & Enter Lobby' : 'Join Lobby';
+                
+                const roleDisplay = document.getElementById('player-role-display');
+                if (roleDisplay) roleDisplay.textContent = isHost ? 'Teacher (Host)' : 'Student (Player)';
+
+                this.renderAvatarSelection();
+            }
+
+            renderAvatarSelection() {
+                const avatars = ['🧑‍🏫', '🎓', '⚖️', '🏛️', '👨‍⚖️', '👩‍⚖️', '📚', '🧠'];
+                const container = document.getElementById('avatar-selection');
+                
+                if (!container) return;
+
+                container.innerHTML = '';
+                this.playerAvatar = avatars[0]; // Default avatar
+
+                avatars.forEach(avatar => {
+                    const button = document.createElement('button');
+                    button.textContent = avatar;
+                    // Initial selected state
+                    const isSelected = avatar === this.playerAvatar;
+                    button.className = `p-4 text-3xl rounded-full border-2 border-transparent hover:border-blue-500 transition duration-150 ${isSelected ? 'avatar-selected' : ''}`;
+                    button.onclick = () => {
+                        this.playerAvatar = avatar;
+                        // Remove selection from all, add to this one
+                        container.querySelectorAll('button').forEach(b => b.classList.remove('avatar-selected'));
+                        button.classList.add('avatar-selected');
+                    };
+                    container.appendChild(button);
+                });
+            }
+
+            async handleLobbyAction() {
+                
+                this.playerName = document.getElementById('player-name-input').value.trim();
+                this.gameId = document.getElementById('game-id-input').value.trim().toUpperCase();
+                
+                if (!this.playerName || !this.playerAvatar) {
+                    this.displayError("Please enter your name and select an avatar.");
+                    return;
+                }
+
+                // Handle Offline Mode (local testing)
+                if (isOfflineMode) {
+                    this.displayError("You are in Offline Mode. Multiplayer features are disabled.");
+                    this.gameId = this.isHost ? "DEMO-HOST" : this.gameId || "DEMO-JOIN";
+                    
+                    this.players = [
+                        { userId: 'OFFLINE-USER', name: this.playerName, avatar: this.playerAvatar, score: 10, isHost: this.isHost }
+                    ];
+
+                    // Mock game state to show game screen/lobby
+                    this.gameData = { status: 'LOBBY', currentRound: 0, drawerId: null, correctTerm: null, timerStart: null };
+                    
+                    document.getElementById('lobby-setup-screen').style.display = 'none';
+                    document.getElementById('lobby-screen').style.display = 'block'; // Show lobby in offline mode
+                    document.getElementById('lobby-game-id').textContent = this.gameId;
+
+                    this.renderPlayerList(); // Render mock players
+                    
+                    if (this.isHost) {
+                        document.getElementById('host-controls').classList.remove('hidden');
+                        document.getElementById('student-info').classList.add('hidden');
+                    } else {
+                        document.getElementById('host-controls').classList.add('hidden');
+                        document.getElementById('student-info').classList.remove('hidden');
+                    }
+                    
+                    return;
+                }
+
+                // Online Mode checks
+                if (!firebaseInitialized || userId === 'loading') {
+                    this.displayError("Connection not ready. Please wait a moment for the game to authenticate.");
+                    return;
+                }
+                
+                if (this.isHost) {
+                    await this.createGame();
+                } else {
+                    if (!this.gameId) {
+                        this.displayError("Please enter the Game ID to join.");
+                        return;
+                    }
+                    await this.tryJoinGame(this.gameId);
+                }
+            }
+
+            async createGame() {
+                try {
+                    // Create a new document in the 'games' collection to get an auto-generated ID
+                    const gamesCollectionRef = collection(db, `artifacts/${finalAppId}/public/data/games`);
+                    const newGameRef = doc(gamesCollectionRef);
+                    this.gameId = newGameRef.id.toUpperCase().slice(0, 6); // Short, easy-to-share ID
+
+                    await setDoc(newGameRef, {
+                        gameId: this.gameId, // Store ID inside the doc for query simplicity
+                        hostId: userId,
+                        status: 'LOBBY',
+                        currentRound: 0,
+                        drawerId: null,
+                        correctTerm: null,
+                        timerStart: null,
+                        maxScore: 0,
+                        createdAt: Date.now()
+                    });
+
+                    // Update the actual document ID to the short ID
+                    await setDoc(doc(gamesCollectionRef, this.gameId), (await getDoc(newGameRef)).data());
+                    await deleteDoc(newGameRef); // Delete the initial doc with the long ID
+
+                    await this.tryJoinGame(this.gameId);
+
+                } catch (e) {
+                    console.error("Error creating game:", e);
+                    this.displayError("Failed to create game. Please check console for details.");
+                }
+            }
+
+            async tryJoinGame(gameId) {
+                try {
+                    const gameRef = doc(db, `artifacts/${finalAppId}/public/data/games`, gameId);
+                    const gameDoc = await getDoc(gameRef);
+
+                    if (!gameDoc.exists()) {
+                        this.displayError(`Game ID "${gameId}" not found.`);
+                        return;
+                    }
+
+                    if (gameDoc.data().status !== 'LOBBY' && gameDoc.data().status !== 'IN_PROGRESS' && !this.isHost) {
+                        this.displayError("Game has finished. Cannot join.");
+                        return;
+                    }
+                    
+                    // The player document ID is the userId
+                    const playerRef = doc(db, `artifacts/${finalAppId}/public/data/players`, userId);
+
+                    // Add/Update player document
+                    await setDoc(playerRef, {
+                        userId: userId,
+                        gameId: gameId,
+                        name: this.playerName,
+                        avatar: this.playerAvatar,
+                        score: 0,
+                        isHost: this.isHost,
+                        lastActive: Date.now()
+                    }, { merge: true });
+
+                    this.gameId = gameId;
+
+                    // Transition to Lobby Screen
+                    document.getElementById('lobby-setup-screen').style.display = 'none';
+                    document.getElementById('lobby-screen').style.display = 'block';
+
+                    document.getElementById('lobby-game-id').textContent = gameId;
+
+                    // Set up Firestore listeners
+                    this.listenToGame(gameRef);
+                    this.listenToPlayers(gameId);
+
+                    if (this.isHost) {
+                        document.getElementById('host-controls')?.classList.remove('hidden');
+                        document.getElementById('student-info')?.classList.add('hidden');
+                    } else {
+                        document.getElementById('host-controls')?.classList.add('hidden');
+                        document.getElementById('student-info')?.classList.remove('hidden');
+                    }
+
+                } catch (e) {
+                    console.error("Error joining game:", e);
+                    this.displayError("Failed to join game. Check console.");
+                }
+            }
+
+            // --- 3. FIREBASE LISTENERS ---
+
+            listenToGame(gameRef) {
+                if (isOfflineMode) return;
+                // Clear previous listener if any
+                if (this.gameUnsubscribe) this.gameUnsubscribe();
+                
+                this.gameUnsubscribe = onSnapshot(gameRef, (doc) => {
+                    if (doc.exists()) {
+                        this.gameData = doc.data();
+                        this.updateGameUI();
+                    } else {
+                        this.displayError("Game was closed by the host.");
+                        this.resetToStartScreen();
+                    }
+                });
+            }
+
+            listenToPlayers(gameId) {
+                if (isOfflineMode) return;
+                // Clear previous listener if any
+                if (this.playersUnsubscribe) this.playersUnsubscribe();
+                
+                const playersQuery = query(
+                    collection(db, `artifacts/${finalAppId}/public/data/players`),
+                    where('gameId', '==', gameId)
+                );
+
+                this.playersUnsubscribe = onSnapshot(playersQuery, (snapshot) => {
+                    this.players = [];
+                    snapshot.forEach(doc => {
+                        this.players.push(doc.data());
+                    });
+                    // Sort by score descending, then name ascending
+                    this.players.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+                    this.renderPlayerList();
+                });
+            }
+
+            listenToGuesses() {
+                if (isOfflineMode) return;
+                // Clear previous listener if any
+                if (this.guessUnsubscribe) this.guessUnsubscribe();
+
+                const guessesQuery = query(
+                    collection(db, `artifacts/${finalAppId}/public/data/guesses`),
+                    where('gameId', '==', this.gameId),
+                    where('round', '==', this.gameData.currentRound)
+                    // Note: No orderBy on timestamp to avoid needing composite index. Sorting done client-side.
+                );
+
+                this.guessUnsubscribe = onSnapshot(guessesQuery, (snapshot) => {
+                    this.renderChat(snapshot.docs.map(doc => doc.data()));
+                });
+            }
+
+            listenToDrawing() {
+                if (isOfflineMode) return;
+                // Clear previous listener if any
+                if (this.drawingUnsubscribe) this.drawingUnsubscribe();
+                
+                const drawingRef = doc(db, `artifacts/${finalAppId}/public/data/drawings`, this.gameId);
+
+                this.drawingUnsubscribe = onSnapshot(drawingRef, (doc) => {
+                    if (doc.exists() && doc.data().history) {
+                        this.drawingHistory = doc.data().history;
+                        this.redrawCanvas();
+                    } else {
+                        this.drawingHistory = [];
+                        this.redrawCanvas();
+                    }
+                });
+            }
+
+            // --- 4. GAME LOGIC & UI UPDATES ---
+
+            updateGameUI() {
+                const { status, currentRound, drawerId, correctTerm, timerStart } = this.gameData;
+
+                // Handle transition between lobby and game screen
+                const gameScreen = document.getElementById('game-screen');
+                const lobbyScreen = document.getElementById('lobby-screen');
+
+                if (status === 'LOBBY' || status === 'FINISHED') {
+                    if (gameScreen && gameScreen.style.display !== 'none') {
+                        gameScreen.style.display = 'none';
+                        if (lobbyScreen) lobbyScreen.style.display = 'block';
+                    }
+                    if (status === 'FINISHED') {
+                        this.displayError("Game has finished. Returning to lobby screen.");
+                    }
+                    return;
+                }
+
+                if (status === 'IN_PROGRESS' || status === 'ROUND_END') {
+                    if (lobbyScreen && lobbyScreen.style.display !== 'none') {
+                        lobbyScreen.style.display = 'none';
+                        if (gameScreen) gameScreen.style.display = 'grid';
+                        this.setupCanvas();
+                        this.listenToDrawing();
+                    }
+                }
+
+                // Determine roles
+                const isDrawer = isOfflineMode || (drawerId === userId); 
+                const isHost = this.isHost;
+
+                // --- General Game State UI ---
+                document.getElementById('game-info-drawer').textContent = this.players.find(p => p.userId === drawerId)?.name || (isOfflineMode ? this.playerName : '...');
+                document.getElementById('game-info-round').textContent = currentRound;
+
+                // Set up controls visibility
+                document.getElementById('drawing-tools').style.display = isDrawer ? 'flex' : 'none';
+                document.getElementById('guessing-area').style.display = isDrawer ? 'none' : 'flex';
+                document.getElementById('guess-input').value = ''; 
+
+                // --- Drawer/Guesser UI ---
+                const drawerTermEl = document.getElementById('drawer-term');
+                const selectTermBtn = document.getElementById('select-term-btn');
+                const guessInfoEl = document.getElementById('guess-info');
+                
+                if (isDrawer) {
+                    if (drawerTermEl) drawerTermEl.textContent = correctTerm ? `Drawing: ${correctTerm}` : 'Select a term to start!';
+                    if (selectTermBtn) selectTermBtn.style.display = correctTerm ? 'none' : 'block';
+                    if (guessInfoEl) guessInfoEl.style.display = 'none';
+                } else {
+                    const placeholder = correctTerm ? correctTerm.split(' ').map(w => w.length > 0 ? Array(w.length).fill('_').join('') : '').join(' ') : '...';
+                    if (drawerTermEl) drawerTermEl.textContent = `Drawing: ${placeholder}`;
+                    if (selectTermBtn) selectTermBtn.style.display = 'none';
+                    if (guessInfoEl) guessInfoEl.style.display = 'block';
+                }
+
+                // --- Host Control Visibility ---
+                document.getElementById('host-game-controls').style.display = isHost ? 'block' : 'none';
+
+                // --- Timer Management ---
+                clearInterval(this.timerInterval);
+                const timerDisplay = document.getElementById('timer-display');
+                const ROUND_DURATION_SECONDS = 60; // Increased round time
+
+                if (timerStart) {
+                    this.timerInterval = setInterval(() => {
+                        const elapsed = Math.floor((Date.now() - timerStart) / 1000);
+                        const timeLeft = ROUND_DURATION_SECONDS - elapsed;
+
+                        if (timeLeft <= 0) {
+                            clearInterval(this.timerInterval);
+                            if (timerDisplay) {
+                                timerDisplay.textContent = 'Time Up!';
+                                timerDisplay.classList.remove('text-green-600', 'text-yellow-600');
+                                timerDisplay.classList.add('text-red-600');
+                            }
+                            if (isHost && !isOfflineMode) this.handleRoundEnd(0);
+                        } else {
+                            if (timerDisplay) {
+                                timerDisplay.textContent = `Time: ${timeLeft}s`;
+                                timerDisplay.classList.remove('text-red-600');
+                                if (timeLeft > 30) {
+                                    timerDisplay.classList.add('text-green-600');
+                                    timerDisplay.classList.remove('text-yellow-600');
+                                } else {
+                                    timerDisplay.classList.add('text-yellow-600');
+                                    timerDisplay.classList.remove('text-green-600');
+                                }
+                            }
+                        }
+                    }, 1000);
+
+                    this.listenToGuesses();
+                    this.guessAttempted = false; 
+
+                } else if (status === 'IN_PROGRESS' && drawerId && !correctTerm) {
+                    if (timerDisplay) timerDisplay.textContent = isDrawer ? 'Select a term!' : 'Awaiting selection...';
+                } else if (status === 'ROUND_END') {
+                    if (timerDisplay) timerDisplay.textContent = `Term was: ${correctTerm}`;
+                    if (drawerTermEl) drawerTermEl.textContent = `The word was: ${correctTerm}`;
+                    // Host automatically starts next round after a pause
+                    if (isHost && !isOfflineMode) {
+                        setTimeout(() => this.startNextRound(), 7000);
+                    }
+                }
+            }
+
+            renderPlayerList() {
+                const container = document.getElementById('player-list');
+                const lobbyContainer = document.getElementById('lobby-player-list');
+                
+                if (!container || !lobbyContainer) return;
+
+                container.innerHTML = '';
+                lobbyContainer.innerHTML = '';
+
+                this.players.forEach(p => {
+                    const isCurrentDrawer = p.userId === this.gameData.drawerId;
+                    const isMe = p.userId === userId;
+                    
+                    const nameHtml = `<span class="font-semibold truncate flex-grow">${p.name} ${p.isHost ? '(Host)' : ''} ${isMe ? '(You)' : ''}</span>`;
+                    
+                    const item = `<li class="flex items-center justify-between p-2 border-b last:border-b-0 ${isMe ? 'bg-blue-50' : ''}">
+                                    <span class="text-xl mr-2">${p.avatar}</span>
+                                    ${nameHtml}
+                                    <span class="font-bold text-lg text-blue-600 ml-2">${p.score} pts</span>
+                                    ${isCurrentDrawer ? '<span class="text-xs bg-yellow-200 text-yellow-800 p-1 rounded-full font-bold">DRAWING</span>' : ''}
+                                  </li>`;
+                    container.innerHTML += item;
+                    lobbyContainer.innerHTML += `<li class="p-2">${p.avatar} ${p.name} ${p.isHost ? '(Host)' : ''}</li>`;
+                });
+
+                const playerCountElement = document.getElementById('lobby-player-count');
+                if (playerCountElement) playerCountElement.textContent = `Players: ${this.players.length}`;
+            }
+
+            // --- 5. HOST ACTIONS ---
+
+            async startGame() {
+                if (isOfflineMode) {
+                    this.displayError("Cannot start game in Offline Mode.");
+                    return;
+                }
+                if (!this.isHost) return;
+                if (this.players.filter(p => !p.isHost).length < 1) {
+                    this.displayError("You need at least one student player to start the game.");
+                    return;
+                }
+
+                // Start the first round
+                await this.startNextRound();
+            }
+
+            async stopGame() {
+                if (isOfflineMode) {
+                    this.resetToStartScreen();
+                    return;
+                }
+                if (!this.isHost) return;
+
+                try {
+                    // Use a batch/transaction for robustness if needed, but simple deletes are fine here.
+                    
+                    // 1. Update game status
+                    await updateDoc(doc(db, `artifacts/${finalAppId}/public/data/games`, this.gameId), {
+                        status: 'FINISHED',
+                        drawerId: null,
+                        correctTerm: null,
+                        timerStart: null,
+                    });
+
+                    // 2. Remove all players from the game (by deleting their player docs)
+                    const playerPromises = this.players.map(p =>
+                        deleteDoc(doc(db, `artifacts/${finalAppId}/public/data/players`, p.userId))
+                    );
+
+                    // 3. Clear drawing history (by deleting the document)
+                    const drawingsRef = doc(db, `artifacts/${finalAppId}/public/data/drawings`, this.gameId);
+                    await deleteDoc(drawingsRef).catch(e => console.log("No drawings doc to delete:", e));
+
+                    await Promise.all(playerPromises);
+                    this.displayError("Game successfully closed.");
+                    this.resetToStartScreen();
+
+                } catch (e) {
+                    console.error("Error stopping game:", e);
+                    this.displayError("Failed to stop game gracefully. Check console.");
+                }
+            }
+
+            async startNextRound() {
+                if (isOfflineMode) return;
+                if (!this.isHost) return;
+
+                // 1. Get the list of non-host players who can draw
+                const studentPlayers = this.players.filter(p => !p.isHost);
+                if (studentPlayers.length === 0) return;
+
+                // 2. Determine the next drawer based on current player list order
+                const currentDrawerId = this.gameData.drawerId;
+                let nextDrawer;
+
+                if (!currentDrawerId) {
+                    // First round: start with the first student in the sorted list
+                    nextDrawer = studentPlayers[0];
+                } else {
+                    // Subsequent rounds: cycle to the next student
+                    const currentIndex = studentPlayers.findIndex(p => p.userId === currentDrawerId);
+                    const nextIndex = (currentIndex + 1) % studentPlayers.length;
+                    nextDrawer = studentPlayers[nextIndex];
+                }
+
+                // 3. Clear drawing history for the new round (ensures canvas is fresh for drawer)
+                await setDoc(doc(db, `artifacts/${finalAppId}/public/data/drawings`, this.gameId), { history: [] });
+
+                // 4. Update game state to start a new round
+                await updateDoc(doc(db, `artifacts/${finalAppId}/public/data/games`, this.gameId), {
+                    status: 'IN_PROGRESS',
+                    currentRound: (this.gameData.currentRound || 0) + 1,
+                    drawerId: nextDrawer.userId,
+                    correctTerm: null, // Drawer needs to select this
+                    timerStart: null,
+                });
+            }
+
+            // Host side: called on correct guess or timeout
+            async handleRoundEnd(score = 0) {
+                if (isOfflineMode) return;
+                if (!this.isHost) return;
+
+                // Check if already ended
+                if (this.gameData.status === 'ROUND_END') return;
+
+                // 1. Update Game Status
+                await updateDoc(doc(db, `artifacts/${finalAppId}/public/data/games`, this.gameId), {
+                    status: 'ROUND_END',
+                });
+
+                // Scoring (only happens if score > 0, handled by submitGuess)
+                // The next round will start automatically after a delay via updateGameUI
+            }
+
+
+            // --- 6. DRAWING LOGIC (Drawer only) ---
+
+            setupCanvas() {
+                this.canvas = document.getElementById('game-canvas');
+                if (!this.canvas) return;
+                
+                this.ctx = this.canvas.getContext('2d');
+                this.resizeCanvas();
+                window.removeEventListener('resize', this.resizeCanvasHandler);
+                this.resizeCanvasHandler = () => this.resizeCanvas();
+                window.addEventListener('resize', this.resizeCanvasHandler);
+
+                // Set up tool selection listeners (ensure they are only attached once)
+                document.querySelectorAll('.tool-btn').forEach(btn => {
+                    btn.onclick = () => {
+                        this.toolColor = btn.dataset.color || '#000000';
+                        this.toolSize = parseInt(btn.dataset.size || '5', 10);
+                        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('bg-gray-300'));
+                        btn.classList.add('bg-gray-300');
+                    };
+                });
+                document.getElementById('clear-canvas-btn')?.addEventListener('click', () => this.clearCanvas(), { once: true });
+
+                // Attach drawing events only if the user is the drawer or in offline mode
+                this.canvas.onmousedown = (e) => this.startDrawing(e);
+                this.canvas.onmousemove = (e) => this.draw(e);
+                this.canvas.onmouseup = () => this.stopDrawing();
+                this.canvas.onmouseout = () => this.stopDrawing();
+
+                this.canvas.ontouchstart = (e) => this.startDrawing(e.touches[0]);
+                this.canvas.ontouchmove = (e) => { e.preventDefault(); this.draw(e.touches[0]); };
+                this.canvas.ontouchend = () => this.stopDrawing();
+
+                this.redrawCanvas(); 
+            }
+
+            resizeCanvas() {
+                if (!this.canvas || !this.ctx) return;
+                const container = this.canvas.parentElement;
+                
+                // Save the current state of the canvas before resizing
+                const oldHistory = [...this.drawingHistory];
+                
+                this.canvas.width = container.clientWidth;
+                this.canvas.height = container.clientHeight;
+                
+                // Redraw the history onto the resized canvas
+                this.drawingHistory = oldHistory;
+                this.redrawCanvas();
+            }
+
+            startDrawing(e) {
+                if (!isOfflineMode && (this.gameData.drawerId !== userId || !this.gameData.correctTerm || !this.gameData.timerStart)) return;
+
+                this.isDrawing = true;
+                const rect = this.canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                this.currentStroke = [{ x, y }];
+                this.ctx.beginPath();
+                this.ctx.moveTo(x, y);
+            }
+
+            draw(e) {
+                if (!this.isDrawing) return;
+                const rect = this.canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                this.ctx.lineTo(x, y);
+                this.ctx.lineWidth = this.toolSize;
+                this.ctx.strokeStyle = this.toolColor;
+                this.ctx.lineCap = 'round';
+                this.ctx.stroke();
+
+                this.currentStroke.push({ x, y });
+            }
+
+            async stopDrawing() {
+                if (!this.isDrawing) return;
+                this.isDrawing = false;
+                this.ctx.closePath();
+
+                if (this.currentStroke.length > 1) {
+                    const newStroke = {
+                        points: this.currentStroke,
+                        color: this.toolColor,
+                        size: this.toolSize
+                    };
+
+                    this.drawingHistory.push(newStroke);
+
+                    if (!isOfflineMode) {
+                        try {
+                             await setDoc(doc(db, `artifacts/${finalAppId}/public/data/drawings`, this.gameId), {
+                                history: this.drawingHistory
+                            }, { merge: true });
+                        } catch(e) {
+                            console.error("Failed to update drawing:", e);
+                        }
+                    }
+                }
+                this.currentStroke = [];
+            }
+
+            redrawCanvas() {
+                if (!this.ctx || !this.canvas) return;
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+                this.drawingHistory.forEach(stroke => {
+                    if (stroke.points && stroke.points.length > 0) {
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+                        this.ctx.lineWidth = stroke.size;
+                        this.ctx.strokeStyle = stroke.color;
+                        this.ctx.lineCap = 'round';
+
+                        for (let i = 1; i < stroke.points.length; i++) {
+                            this.ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+                        }
+                        this.ctx.stroke();
+                        this.ctx.closePath();
+                    }
+                });
+            }
+
+            async clearCanvas() {
+                if (!isOfflineMode && this.gameData.drawerId !== userId) return;
+                this.drawingHistory = [];
+                this.redrawCanvas();
+                if (!isOfflineMode) {
+                    await setDoc(doc(db, `artifacts/${finalAppId}/public/data/drawings`, this.gameId), { history: [] });
+                }
+            }
+
+
+            // --- 7. GUESSING LOGIC (Guesser only) ---
+
+            async submitGuess() {
+                if (isOfflineMode) {
+                    this.displayError("Guessing is disabled in Offline Mode.");
+                    document.getElementById('guess-input').value = '';
+                    return;
+                }
+                if (this.gameData.drawerId === userId || this.gameData.status !== 'IN_PROGRESS' || !this.gameData.correctTerm) return;
+                
+                const guessInput = document.getElementById('guess-input');
+                const rawGuess = guessInput.value.trim();
+                if (!rawGuess) return;
+
+                // Normalize for simple matching: remove spaces and non-alphanumeric, convert to lower case
+                const normalize = (text) => text.toLowerCase().replace(/[^a-z0-9]/g, '');
+                const guess = normalize(rawGuess);
+                const correctTerm = normalize(this.gameData.correctTerm);
+
+                const guessRef = collection(db, `artifacts/${finalAppId}/public/data/guesses`);
+                const timestamp = Date.now();
+                let isCorrect = guess === correctTerm;
+
+                // 1. Log the guess (always log)
+                await addDoc(guessRef, {
+                    gameId: this.gameId,
+                    round: this.gameData.currentRound,
+                    userId: userId,
+                    name: this.playerName,
+                    guess: rawGuess,
+                    timestamp: timestamp,
+                    isCorrect: isCorrect
+                });
+
+                // 2. Check for correct answer and award points
+                if (isCorrect && !this.guessAttempted) {
+                    this.guessAttempted = true; 
+                    const timeElapsed = Math.floor((Date.now() - this.gameData.timerStart) / 1000);
+                    const score = Math.max(5, 60 - timeElapsed); // Points based on time remaining (min 5 points)
+
+                    try {
+                        await runTransaction(db, async (transaction) => {
+                            const drawerRef = doc(db, `artifacts/${finalAppId}/public/data/players`, this.gameData.drawerId);
+                            const guesserRef = doc(db, `artifacts/${finalAppId}/public/data/players`, userId);
+                            
+                            const drawerDoc = await transaction.get(drawerRef);
+                            const guesserDoc = await transaction.get(guesserRef);
+
+                            if (drawerDoc.exists() && guesserDoc.exists()) {
+                                // Award points to the drawer and the guesser
+                                transaction.update(drawerRef, { score: drawerDoc.data().score + score });
+                                transaction.update(guesserRef, { score: guesserDoc.data().score + score });
+                            }
+                        });
+
+                        // Log system message
+                        const guesserName = this.players.find(p => p.userId === userId)?.name || this.playerName;
+                        await addDoc(guessRef, {
+                            gameId: this.gameId,
+                            round: this.gameData.currentRound,
+                            userId: 'SYSTEM',
+                            name: 'SYSTEM',
+                            guess: `${guesserName} correctly guessed the term! (${this.gameData.correctTerm}) Both earn ${score} points!`,
+                            timestamp: Date.now() + 1, // Ensure system message appears after the guess
+                            isCorrect: true 
+                        });
+
+                        // Host ends the round (only host should call this)
+                        if (this.isHost) {
+                            this.handleRoundEnd(score);
+                        }
+
+                    } catch (e) {
+                        console.error("Transaction failed:", e);
+                        this.displayError("Error awarding points. Check console.");
+                    }
+                }
+
+                guessInput.value = ''; // Clear the input
+            }
+
+            renderChat(guesses) {
+                const chatBox = document.getElementById('chat-box');
+                if (!chatBox) return;
+                
+                chatBox.innerHTML = ''; 
+
+                guesses.sort((a, b) => a.timestamp - b.timestamp);
+
+                guesses.forEach(g => {
+                    const isSystem = g.userId === 'SYSTEM';
+                    const isMe = g.userId === userId && !isSystem;
+
+                    let chatClass = 'text-gray-700';
+                    if (isSystem) {
+                        chatClass = 'font-bold text-green-700 bg-green-100 p-1 rounded-md';
+                    } else if (g.isCorrect) {
+                        chatClass = 'font-bold text-emerald-600';
+                    } else if (isMe) {
+                        chatClass = 'text-blue-600';
+                    }
+
+                    const nameDisplay = isSystem ? '' : `<span class="font-semibold">${g.name}: </span>`;
+                    const guessText = `<p class="${chatClass}">${nameDisplay}${g.guess}</p>`;
+                    chatBox.innerHTML += guessText;
+                });
+
+                // Scroll to bottom
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+
+            // --- 8. TERM SELECTION (Drawer only) ---
+
+            showTermSelectionModal() {
+                if (!isOfflineMode && (this.gameData.drawerId !== userId || this.gameData.correctTerm)) return;
+
+                const termOptions = [];
+                while (termOptions.length < 3) {
+                    const randomIndex = Math.floor(Math.random() * VCE_TERMS.length);
+                    const term = VCE_TERMS[randomIndex];
+                    if (!termOptions.includes(term)) {
+                        termOptions.push(term);
+                    }
+                }
+
+                const container = document.getElementById('term-options');
+                if (!container) return; 
+                
+                container.innerHTML = '';
+
+                termOptions.forEach(term => {
+                    const button = document.createElement('button');
+                    button.textContent = term;
+                    button.className = 'btn-secondary w-full mb-3';
+                    button.onclick = () => this.selectTerm(term);
+                    container.appendChild(button);
+                });
+
+                document.getElementById('term-selection-modal')?.classList.remove('hidden');
+            }
+
+            async selectTerm(term) {
+                if (!isOfflineMode && (this.gameData.drawerId !== userId || this.gameData.correctTerm)) return;
+
+                document.getElementById('term-selection-modal')?.classList.add('hidden');
+
+                // Start the round
+                if (isOfflineMode) {
+                    this.gameData.correctTerm = term;
+                    this.gameData.timerStart = Date.now();
+                    this.updateGameUI(); 
+                } else {
+                    await updateDoc(doc(db, `artifacts/${finalAppId}/public/data/games`, this.gameId), {
+                        correctTerm: term,
+                        timerStart: Date.now()
+                    });
+                }
+                
+                this.clearCanvas();
+            }
+
+            // --- 9. UTILITY ---
+
+            resetToStartScreen() {
+                // Clear state and listeners
+                this.gameId = '';
+                this.gameData = {};
+                this.players = [];
+                this.drawingHistory = [];
+                if (this.guessUnsubscribe) this.guessUnsubscribe();
+                if (this.drawingUnsubscribe) this.drawingUnsubscribe();
+                if (this.gameUnsubscribe) this.gameUnsubscribe();
+                if (this.playersUnsubscribe) this.playersUnsubscribe();
+                clearInterval(this.timerInterval);
+
+                // Show start screen
+                document.getElementById('start-screen').style.display = 'block';
+                document.getElementById('lobby-setup-screen').style.display = 'none';
+                document.getElementById('lobby-screen').style.display = 'none';
+                document.getElementById('game-screen').style.display = 'none';
+                
+                // Re-initialize to re-check for offline mode (if needed)
+                this.setupFirebase();
+            }
+        }
+
+        // Global initialization
+        window.onload = () => {
+            window.pictionaryApp = new PictionaryApp();
+        };
+    </script>
+
+    <!-- Error Message Display -->
+    <div id="error-message" class="hidden fixed top-0 left-1/2 -translate-x-1/2 mt-4 p-3 bg-red-500 text-white font-bold rounded-lg shadow-xl z-50"></div>
+
+    <!-- 1. Start Screen -->
+    <div id="start-screen" class="max-w-xl mx-auto p-6 bg-white rounded-xl shadow-2xl text-center">
+        <h1 class="text-4xl font-extrabold text-blue-600 mb-2">VCE Legal Studiary</h1>
+        <p class="text-gray-600 mb-8">Revision Game for Units 3 & 4 Key Terms & Cases</p>
+        <div class="space-y-4">
+            <button id="host-btn" class="btn-primary w-full text-xl py-3" disabled>
+                Teacher: Create Game
+            </button>
+            <button id="join-btn" class="btn-secondary w-full text-xl py-3" disabled>
+                Student: Join Game
+            </button>
+        </div>
+        <p id="player-auth-status" class="mt-4 text-sm text-gray-500">Connecting...</p>
+    </div>
+
+    <!-- 2. Lobby Setup Screen -->
+    <div id="lobby-setup-screen" class="hidden max-w-lg mx-auto p-8 bg-white rounded-xl shadow-2xl">
+        <h2 id="setup-title" class="text-3xl font-bold text-gray-800 mb-2 text-center">Setup</h2>
+        <p id="player-role-display" class="text-lg font-semibold text-center text-blue-600 mb-6"></p>
+
+        <div class="mb-6">
+            <label for="player-name-input" class="block text-gray-700 font-semibold mb-2">Your Name</label>
+            <input type="text" id="player-name-input" placeholder="Enter your name" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" maxlength="20">
+        </div>
+
+        <div class="mb-6">
+            <label for="game-id-input" class="block text-gray-700 font-semibold mb-2">Game ID</label>
+            <input type="text" id="game-id-input" placeholder="Enter Game ID" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase" maxlength="10">
+        </div>
+
+        <div class="mb-8">
+            <h3 class="block text-gray-700 font-semibold mb-3">Select Avatar</h3>
+            <div id="avatar-selection" class="flex justify-around items-center flex-wrap">
+                <!-- Avatars rendered by JS -->
+            </div>
+        </div>
+
+        <div class="flex flex-col space-y-4">
+            <button id="create-join-btn" class="btn-primary w-full py-3">Join Lobby</button>
+            <button id="setup-back-btn" class="text-gray-500 hover:text-gray-800 transition">Back to Main Menu</button>
+        </div>
+    </div>
+
+    <!-- 3. Lobby Screen (Waiting Area) -->
+    <div id="lobby-screen" class="hidden max-w-3xl mx-auto p-8 bg-white rounded-xl shadow-2xl">
+        <h2 class="text-3xl font-bold text-gray-800 mb-4">Game Lobby</h2>
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 border-b pb-4">
+            <p class="text-xl text-gray-600 mb-2 sm:mb-0">Game ID: <code id="lobby-game-id" class="font-mono bg-yellow-200 text-yellow-800 px-2 py-1 rounded-md select-all"></code></p>
+            <p id="lobby-player-count" class="text-lg text-blue-600 font-semibold">Players: 0</p>
+        </div>
+
+        <div id="host-controls" class="hidden mb-6 bg-blue-50 p-4 rounded-lg border-l-4 border-blue-400">
+            <h3 class="text-xl font-semibold mb-2 text-blue-700">Teacher Host Controls</h3>
+            <p class="text-gray-600 mb-4">Share the Game ID above with your students to let them join. Minimum 1 student required.</p>
+            <button id="start-game-btn" class="btn-secondary" onclick="window.pictionaryApp.startGame()">Start Game</button>
+        </div>
+
+        <div id="student-info" class="hidden mb-6 bg-emerald-50 p-4 rounded-lg border-l-4 border-emerald-400">
+            <h3 class="text-xl font-semibold text-emerald-700">Waiting for Teacher...</h3>
+            <p class="text-gray-600">The game will start automatically when the teacher begins the first round.</p>
+        </div>
+
+        <h3 class="text-2xl font-bold text-gray-800 mb-4">Current Players:</h3>
+        <ul id="lobby-player-list" class="max-h-60 overflow-y-auto space-y-2 divide-y">
+            <!-- Player list rendered by JS -->
+        </ul>
+    </div>
+
+    <!-- 4. Game Screen -->
+    <div id="game-screen" class="hidden max-w-7xl mx-auto p-0 lg:p-4">
+
+        <!-- Column 1 (Canvas & Tools) -->
+        <div class="lg:col-span-3 bg-white p-6 rounded-xl shadow-2xl flex flex-col h-[calc(100vh-6rem)] lg:h-[calc(100vh-8rem)]">
+            <div class="flex justify-between items-center mb-4 pb-2 border-b">
+                <h3 id="drawer-term" class="text-2xl font-bold text-gray-800 truncate">Waiting for Drawer...</h3>
+                <div class="flex items-center space-x-4">
+                    <button id="select-term-btn" class="btn-secondary hidden" onclick="window.pictionaryApp.showTermSelectionModal()" style="font-size: 0.9rem;">Select Term</button>
+                    <div id="timer-display" class="text-3xl font-extrabold text-gray-500">Timer</div>
+                </div>
+            </div>
+
+            <!-- Canvas Drawing Area -->
+            <div class="flex-grow canvas-container mb-4">
+                <canvas id="game-canvas"></canvas>
+            </div>
+
+            <!-- Drawing Tools (Visible to Drawer only) -->
+            <div id="drawing-tools" class="hidden flex flex-wrap justify-center space-x-2 p-2 bg-gray-50 rounded-lg shadow-inner border border-gray-200">
+                <div class="flex items-center space-x-2 p-1">
+                    <button class="tool-btn bg-black" data-color="#000000" data-size="5"></button>
+                    <button class="tool-btn bg-red-500" data-color="#ef4444" data-size="5"></button>
+                    <button class="tool-btn bg-blue-500" data-color="#3b82f6" data-size="5"></button>
+                    <button class="tool-btn bg-green-500" data-color="#10b981" data-size="5"></button>
+                    <button class="tool-btn bg-yellow-400" data-color="#facc15" data-size="5"></button>
+                </div>
+                <div class="flex items-center space-x-2 p-1 border-l pl-3">
+                    <button class="tool-btn p-3 rounded-md border text-xs h-8 w-10" data-color="#000000" data-size="3">3px</button>
+                    <button class="tool-btn p-3 rounded-md border text-xs h-8 w-10 bg-gray-300" data-color="#000000" data-size="5">5px</button>
+                    <button class="tool-btn p-3 rounded-md border text-xs h-8 w-10" data-color="#000000" data-size="10">10</button>
+                    <button class="tool-btn p-3 rounded-md border text-xs h-8 w-10" data-color="#000000" data-size="20">20</button>
+                </div>
+                <div class="flex items-center space-x-2 p-1 border-l pl-3">
+                    <button class="bg-white border border-gray-400 px-3 py-1 rounded-md text-sm hover:bg-gray-100" data-color="#ffffff" data-size="30">Eraser</button>
+                </div>
+                <div class="flex items-center space-x-2 p-1 border-l pl-3">
+                    <button id="clear-canvas-btn" class="bg-red-500 text-white px-3 py-1 rounded-md text-sm hover:bg-red-600">Clear</button>
+                </div>
+            </div>
+
+            <!-- Guessing Area (Visible to Guessers only) -->
+            <div id="guessing-area" class="flex items-center space-x-3 p-2 bg-gray-50 rounded-lg shadow-inner border border-gray-200">
+                <label id="guess-info" class="font-semibold text-gray-700">Your Guess:</label>
+                <input type="text" id="guess-input" placeholder="Type your guess here..." class="flex-grow p-2 border border-gray-300 rounded-lg">
+                <button id="guess-btn" class="btn-primary">Submit</button>
+            </div>
+        </div>
+
+        <!-- Column 2 (Scoreboard and Chat) -->
+        <div class="lg:col-span-1 flex flex-col space-y-6">
+            
+            <!-- Scoreboard -->
+            <div class="bg-white p-6 rounded-xl shadow-2xl">
+                <h3 class="text-2xl font-bold text-blue-600 mb-4">Scoreboard</h3>
+                <p class="text-xs text-gray-500 mb-2">Drawer: <span id="game-info-drawer" class="font-bold"></span> | Round: <span id="game-info-round" class="font-bold"></span></p>
+                <ul id="player-list" class="divide-y divide-gray-200">
+                    <!-- Player scores rendered by JS -->
+                </ul>
+            </div>
+
+            <!-- Chat/Guess Log -->
+            <div class="bg-white p-6 rounded-xl shadow-2xl flex-grow flex flex-col min-h-64">
+                <h3 class="text-2xl font-bold text-emerald-600 mb-4">Game Chat</h3>
+                <div id="chat-box" class="flex-grow overflow-y-auto space-y-2 text-sm p-2 bg-gray-50 rounded-lg border border-gray-200">
+                    <!-- Chat messages rendered by JS -->
+                    <p class="text-gray-500">Guesses and system messages will appear here...</p>
+                </div>
+            </div>
+
+            <!-- Host Controls -->
+            <div id="host-game-controls" class="hidden bg-red-100 p-4 rounded-xl border border-red-300">
+                <h4 class="font-bold text-red-700 mb-2">Host Options</h4>
+                <button id="stop-game-btn" class="bg-red-500 text-white font-bold py-2 px-4 rounded-lg w-full hover:bg-red-600 transition">End Game</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Term Selection Modal (Hidden by Default) -->
+    <div id="term-selection-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div class="bg-white p-8 rounded-xl shadow-2xl max-w-sm w-full text-center">
+            <h3 class="text-2xl font-bold text-blue-700 mb-4">Select Your Term</h3>
+            <p class="text-gray-600 mb-6">Choose one of the three VCE Legal terms to draw this round.</p>
+            <div id="term-options" class="space-y-3">
+                <!-- Buttons rendered by JS -->
+            </div>
+        </div>
+    </div>
+</body>
+</html>
