@@ -27,10 +27,10 @@
             height: 100%;
         }
         .btn-primary {
-            @apply bg-blue-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg hover:bg-blue-700 transition duration-150 ease-in-out;
+            @apply bg-blue-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg hover:bg-blue-700 transition duration-150 ease-in-out disabled:bg-gray-400 disabled:shadow-none;
         }
         .btn-secondary {
-            @apply bg-emerald-500 text-white font-bold py-2 px-4 rounded-lg shadow-lg hover:bg-emerald-600 transition duration-150 ease-in-out;
+            @apply bg-emerald-500 text-white font-bold py-2 px-4 rounded-lg shadow-lg hover:bg-emerald-600 transition duration-150 ease-in-out disabled:bg-gray-400 disabled:shadow-none;
         }
         .avatar-selected {
             box-shadow: 0 0 0 3px var(--secondary-color);
@@ -39,19 +39,37 @@
 </head>
 <body class="bg-gray-100 min-h-screen p-4 sm:p-8">
 
+    
     <!-- Firebase SDK Imports -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, limit, arrayUnion, arrayRemove, getDocs, deleteDoc, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, setLogLevel, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, arrayUnion, arrayRemove, getDocs, deleteDoc, where, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Global Firebase variables (MUST be defined/used as per platform constraints)
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        // Global Firebase variables are now SAFELY accessed here
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'self-hosted-pictionary';
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // Safety check for config string provided by the environment
+        const providedConfig = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+        
+        // Provide a robust fallback config if running outside the environment (e.g., locally)
+        const fallbackConfig = JSON.stringify({
+            apiKey: "YOUR_API_KEY",
+            authDomain: "your-project.firebaseapp.com",
+            projectId: "your-project-id",
+            storageBucket: "your-project.appspot.com",
+            messagingSenderId: "123456789012",
+            appId: "1:123456789012:web:abcdef1234567890"
+        });
+
+        // Use provided config if available, otherwise use the fallback
+        const firebaseConfigString = providedConfig || fallbackConfig;
+
 
         let app, db, auth;
         let userId = 'loading'; // Will be updated on auth state change
+        let firebaseInitialized = false; // Flag to track successful Firebase initialization
 
         // ----------------------------------------------------------------------
         // VCE Legal Pictionary Terms (Units 3 & 4)
@@ -105,12 +123,15 @@
 
             setupUI() {
                 document.getElementById('start-screen').style.display = 'block';
+                document.getElementById('lobby-setup-screen').style.display = 'none';
                 document.getElementById('lobby-screen').style.display = 'none';
                 document.getElementById('game-screen').style.display = 'none';
 
-                // Initial Screen Event Listeners
+                // Initial Screen Event Listeners (DISABLED until auth is ready)
                 document.getElementById('host-btn').addEventListener('click', () => this.showLobbySetup(true));
                 document.getElementById('join-btn').addEventListener('click', () => this.showLobbySetup(false));
+                document.getElementById('host-btn').disabled = true;
+                document.getElementById('join-btn').disabled = true;
 
                 // Lobby Setup Screen Event Listeners
                 document.getElementById('setup-back-btn').addEventListener('click', () => this.resetToStartScreen());
@@ -123,38 +144,64 @@
                 document.getElementById('guess-btn').addEventListener('click', () => this.submitGuess());
                 document.getElementById('select-term-btn').addEventListener('click', () => this.showTermSelectionModal());
                 document.getElementById('stop-game-btn').addEventListener('click', () => this.stopGame());
-                document.getElementById('player-role-display').textContent = 'Loading...';
+                document.getElementById('player-auth-status').textContent = 'Connecting...';
             }
 
             async setupFirebase() {
-                if (!firebaseConfig) {
-                    console.error("Firebase config not available. Cannot initialize app.");
-                    this.displayError("Configuration Error: Firebase settings are missing.");
-                    return;
+                let firebaseConfig;
+
+                try {
+                    // 1. Check and parse configuration
+                    if (!firebaseConfigString) {
+                        this.displayError("Configuration Error: Firebase config is entirely missing.");
+                        document.getElementById('player-auth-status').textContent = 'Error: No Config';
+                        return;
+                    }
+                    
+                    firebaseConfig = JSON.parse(firebaseConfigString);
+
+                    // 2. Initialize Firebase
+                    // If firebaseConfig contains placeholder keys, initialization will fail silently 
+                    // and be handled by onAuthStateChanged below.
+                    app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+                    setLogLevel('debug');
+                    firebaseInitialized = true;
+
+                } catch (e) {
+                    console.error("Error initializing Firebase:", e);
+                    this.displayError("Firebase Initialization Failed. Check your config in the HTML file.");
+                    document.getElementById('player-auth-status').textContent = 'Error: Init Failed';
+                    return; // Exit if initialization failed
                 }
-                app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
 
-                // Log level for debugging
-                // setLogLevel('Debug');
-
+                // 3. Set up Auth State Listener and Sign In
                 onAuthStateChanged(auth, async (user) => {
                     if (user) {
                         userId = user.uid;
-                        document.getElementById('player-role-display').textContent = this.isHost ? 'Teacher (Host)' : 'Student (Player)';
                         console.log("Authenticated with UID:", userId);
-                        // Once authenticated, check if they were in a game, or go to start screen.
-                        if (this.gameId) {
-                            await this.tryJoinGame(this.gameId);
+                        
+                        // Enable buttons on the start screen now that auth is ready
+                        document.getElementById('host-btn').disabled = false;
+                        document.getElementById('join-btn').disabled = false;
+                        document.getElementById('player-auth-status').classList.remove('text-gray-500', 'text-red-500');
+                        document.getElementById('player-auth-status').classList.add('text-green-600', 'font-semibold');
+                        document.getElementById('player-auth-status').textContent = 'Ready!';
+
+                        // If a lobby action was pending (e.g., clicked before auth finished)
+                        if (document.getElementById('lobby-setup-screen').style.display === 'block') {
+                            this.handleLobbyAction(true); // Retry action after auth
                         }
+
                     } else {
-                        // Sign in anonymously if no custom token is available
+                        // Attempt to sign in if not already signed in
                         if (initialAuthToken) {
                             try {
                                 await signInWithCustomToken(auth, initialAuthToken);
                             } catch (e) {
-                                console.error("Error signing in with custom token:", e);
+                                console.error("Error signing in with custom token. Attempting anonymous sign-in.", e);
+                                document.getElementById('player-auth-status').textContent = 'Connecting... (Sign-in Error)';
                                 await signInAnonymously(auth);
                             }
                         } else {
@@ -168,7 +215,7 @@
                 const errorDiv = document.getElementById('error-message');
                 errorDiv.textContent = message;
                 errorDiv.classList.remove('hidden');
-                setTimeout(() => errorDiv.classList.add('hidden'), 5000);
+                setTimeout(() => errorDiv.classList.add('hidden'), 7000);
             }
 
             // --- 2. LOBBY MANAGEMENT ---
@@ -208,23 +255,32 @@
                 });
             }
 
-            async handleLobbyAction() {
-                this.playerName = document.getElementById('player-name-input').value.trim();
-                let gameIdInput = document.getElementById('game-id-input').value.trim();
+            // The 'retry' flag is used when this is called from the onAuthStateChanged listener
+            async handleLobbyAction(retry = false) {
+                // Since buttons on start screen are disabled until ready, this check is less critical now,
+                // but kept for robustness, especially for the lobby action button.
+                if (!firebaseInitialized || userId === 'loading') {
+                    this.displayError("Connection not ready. Please wait a moment for the game to authenticate.");
+                    return;
+                }
 
+                if (!retry) {
+                    this.playerName = document.getElementById('player-name-input').value.trim();
+                    this.gameId = document.getElementById('game-id-input').value.trim();
+                }
+                
                 if (!this.playerName || !this.playerAvatar) {
                     this.displayError("Please enter your name and select an avatar.");
                     return;
                 }
-
+                
                 if (this.isHost) {
                     await this.createGame();
                 } else {
-                    if (!gameIdInput) {
+                    if (!this.gameId) {
                         this.displayError("Please enter the Game ID to join.");
                         return;
                     }
-                    this.gameId = gameIdInput;
                     await this.tryJoinGame(this.gameId);
                 }
             }
@@ -312,7 +368,7 @@
             // --- 3. FIREBASE LISTENERS ---
 
             listenToGame(gameRef) {
-                onSnapshot(gameRef, (doc) => {
+                this.gameUnsubscribe = onSnapshot(gameRef, (doc) => {
                     if (doc.exists()) {
                         this.gameData = doc.data();
                         this.updateGameUI();
@@ -330,7 +386,7 @@
                     where('gameId', '==', gameId)
                 );
 
-                onSnapshot(playersQuery, (snapshot) => {
+                this.playersUnsubscribe = onSnapshot(playersQuery, (snapshot) => {
                     this.players = [];
                     snapshot.forEach(doc => {
                         this.players.push(doc.data());
@@ -402,7 +458,8 @@
 
                 // Set up controls visibility
                 document.getElementById('drawing-tools').style.display = isDrawer ? 'flex' : 'none';
-                document.getElementById('guessing-area').style.display = isDrawer ? 'none' : 'block';
+                document.getElementById('guessing-area').style.display = isDrawer ? 'none' : 'flex'; // Changed to flex to match input/button
+                document.getElementById('guess-input').value = ''; // Clear input on state change
 
                 // --- Drawing Player specific UI ---
                 if (isDrawer) {
@@ -411,7 +468,9 @@
                     document.getElementById('guess-info').style.display = 'none';
                 } else {
                     // Guesser UI
-                    document.getElementById('drawer-term').textContent = `Drawing: ${correctTerm ? Array(correctTerm.length).fill('_').join(' ') : '...'}`;
+                    const placeholder = correctTerm ? Array(correctTerm.length).fill('_').join(' ') : '...';
+                    document.getElementById('drawer-term').textContent = `Drawing: ${placeholder}`;
+                    document.getElementById('select-term-btn').style.display = 'none';
                     document.getElementById('guess-info').style.display = 'block';
                 }
 
@@ -469,11 +528,12 @@
                 lobbyContainer.innerHTML = '';
 
                 this.players.forEach(p => {
+                    const isCurrentDrawer = p.userId === this.gameData.drawerId;
                     const item = `<li class="flex items-center justify-between p-2 border-b last:border-b-0">
                                     <span class="text-xl mr-2">${p.avatar}</span>
                                     <span class="font-semibold truncate flex-grow">${p.name} ${p.isHost ? '(Host)' : ''}</span>
                                     <span class="font-bold text-lg text-blue-600 ml-2">${p.score} pts</span>
-                                    ${p.userId === this.gameData.drawerId ? '<span class="text-sm bg-yellow-200 text-yellow-800 p-1 rounded-full">DRAWING</span>' : ''}
+                                    ${isCurrentDrawer ? '<span class="text-sm bg-yellow-200 text-yellow-800 p-1 rounded-full">DRAWING</span>' : ''}
                                   </li>`;
                     container.innerHTML += item;
                     lobbyContainer.innerHTML += `<li class="p-2">${p.avatar} ${p.name}</li>`;
@@ -844,6 +904,8 @@
                 this.drawingHistory = [];
                 if (this.guessUnsubscribe) this.guessUnsubscribe();
                 if (this.drawingUnsubscribe) this.drawingUnsubscribe();
+                if (this.gameUnsubscribe) this.gameUnsubscribe();
+                if (this.playersUnsubscribe) this.playersUnsubscribe();
                 clearInterval(this.timerInterval);
 
                 // Show start screen
@@ -851,6 +913,13 @@
                 document.getElementById('lobby-setup-screen').style.display = 'none';
                 document.getElementById('lobby-screen').style.display = 'none';
                 document.getElementById('game-screen').style.display = 'none';
+                
+                // Re-disable buttons until auth confirms ready again (though it should be immediate now)
+                document.getElementById('host-btn').disabled = true;
+                document.getElementById('join-btn').disabled = true;
+                document.getElementById('player-auth-status').classList.remove('text-green-600', 'font-semibold', 'text-red-500');
+                document.getElementById('player-auth-status').classList.add('text-gray-500');
+                document.getElementById('player-auth-status').textContent = 'Connecting...';
             }
         }
 
@@ -863,4 +932,149 @@
     <div id="error-message" class="hidden fixed top-0 left-1/2 -translate-x-1/2 mt-4 p-3 bg-red-500 text-white font-bold rounded-lg shadow-xl z-50"></div>
 
     <!-- 1. Start Screen -->
-    <div id="start-screen" class="max-w-xl mx-auto p-6 bg-white rounded-xl shadow-2xl text-center
+    <div id="start-screen" class="max-w-xl mx-auto p-6 bg-white rounded-xl shadow-2xl text-center">
+        <h1 class="text-4xl font-extrabold text-blue-600 mb-2">VCE Legal Pictionary</h1>
+        <p class="text-gray-600 mb-8">Revision Game for Units 3 & 4 Key Terms & Cases</p>
+        <div class="space-y-4">
+            <button id="host-btn" class="btn-primary w-full text-xl py-3" disabled>
+                Teacher: Create Game
+            </button>
+            <button id="join-btn" class="btn-secondary w-full text-xl py-3" disabled>
+                Student: Join Game
+            </button>
+        </div>
+        <p id="player-auth-status" class="mt-4 text-sm text-gray-500">Connecting...</p>
+    </div>
+
+    <!-- 2. Lobby Setup Screen -->
+    <div id="lobby-setup-screen" class="hidden max-w-lg mx-auto p-8 bg-white rounded-xl shadow-2xl">
+        <h2 id="setup-title" class="text-3xl font-bold text-gray-800 mb-6 text-center">Setup</h2>
+
+        <div class="mb-6">
+            <label for="player-name-input" class="block text-gray-700 font-semibold mb-2">Your Name</label>
+            <input type="text" id="player-name-input" placeholder="Enter your name" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" maxlength="20">
+        </div>
+
+        <div class="mb-6">
+            <label for="game-id-input" class="block text-gray-700 font-semibold mb-2">Game ID</label>
+            <input type="text" id="game-id-input" placeholder="Enter Game ID" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase" maxlength="10">
+        </div>
+
+        <div class="mb-8">
+            <h3 class="block text-gray-700 font-semibold mb-3">Select Avatar</h3>
+            <div id="avatar-selection" class="flex justify-around items-center flex-wrap">
+                <!-- Avatars rendered by JS -->
+            </div>
+        </div>
+
+        <div class="flex flex-col space-y-4">
+            <button id="create-join-btn" class="btn-primary w-full py-3">Join Lobby</button>
+            <button id="setup-back-btn" class="text-gray-500 hover:text-gray-800 transition">Back to Main Menu</button>
+        </div>
+    </div>
+
+    <!-- 3. Lobby Screen (Waiting Area) -->
+    <div id="lobby-screen" class="hidden max-w-3xl mx-auto p-8 bg-white rounded-xl shadow-2xl">
+        <h2 class="text-3xl font-bold text-gray-800 mb-4">Game Lobby</h2>
+        <div class="flex justify-between items-center mb-6 border-b pb-4">
+            <p class="text-xl text-gray-600">Game ID: <code id="lobby-game-id" class="font-mono bg-yellow-200 text-yellow-800 px-2 py-1 rounded-md"></code></p>
+            <p id="lobby-player-count" class="text-lg text-blue-600 font-semibold">Players: 0/30</p>
+        </div>
+
+        <div id="host-controls" class="hidden mb-6 bg-blue-50 p-4 rounded-lg border-l-4 border-blue-400">
+            <h3 class="text-xl font-semibold mb-2 text-blue-700">Teacher Host Controls</h3>
+            <p class="text-gray-600 mb-4">Share the Game ID above with your students to let them join.</p>
+            <button id="start-game-btn" class="btn-secondary" onclick="window.pictionaryApp.startGame()">Start Game</button>
+        </div>
+
+        <div id="student-info" class="hidden mb-6 bg-emerald-50 p-4 rounded-lg border-l-4 border-emerald-400">
+            <h3 class="text-xl font-semibold text-emerald-700">Waiting for Teacher...</h3>
+            <p class="text-gray-600">Once the teacher has started the game, you will automatically be moved to the game screen.</p>
+        </div>
+
+        <h3 class="text-2xl font-bold text-gray-800 mb-4">Current Players:</h3>
+        <ul id="lobby-player-list" class="max-h-60 overflow-y-auto space-y-2">
+            <!-- Player list rendered by JS -->
+        </ul>
+    </div>
+
+    <!-- 4. Game Screen -->
+    <div id="game-screen" class="hidden max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-6">
+
+        <!-- Column 1 & 2: Main Game Area (Canvas) -->
+        <div class="lg:col-span-3 bg-white p-6 rounded-xl shadow-2xl h-[calc(100vh-10rem)] flex flex-col">
+            <div class="flex justify-between items-center mb-4 pb-2 border-b">
+                <h3 id="drawer-term" class="text-2xl font-bold text-gray-800">Waiting for Drawer...</h3>
+                <button id="select-term-btn" class="btn-secondary hidden" style="font-size: 0.9rem;">Select Term</button>
+                <div id="timer-display" class="text-3xl font-extrabold text-gray-500">Timer</div>
+            </div>
+
+            <!-- Canvas Drawing Area -->
+            <div class="flex-grow canvas-container mb-4">
+                <canvas id="game-canvas"></canvas>
+            </div>
+
+            <!-- Drawing Tools (Visible to Drawer only) -->
+            <div id="drawing-tools" class="hidden flex justify-center space-x-2 p-2 bg-gray-50 rounded-lg shadow-inner border border-gray-200">
+                <div class="flex space-x-1">
+                    <button class="tool-btn bg-black data-color" data-color="#000000" data-size="5"></button>
+                    <button class="tool-btn bg-red-500 data-color" data-color="#ef4444" data-size="5"></button>
+                    <button class="tool-btn bg-blue-500 data-color" data-color="#3b82f6" data-size="5"></button>
+                    <button class="tool-btn bg-green-500 data-color" data-color="#10b981" data-size="5"></button>
+                </div>
+                <div class="flex space-x-2 border-l pl-2">
+                    <button class="tool-btn bg-black p-3 rounded-full data-size" data-color="#000000" data-size="5">S</button>
+                    <button class="tool-btn bg-black p-3 rounded-full data-size" data-color="#000000" data-size="10">M</button>
+                    <button class="tool-btn bg-black p-3 rounded-full data-size" data-color="#000000" data-size="15">L</button>
+                </div>
+                <button id="clear-canvas-btn" class="bg-red-500 text-white p-2 rounded-lg hover:bg-red-600 transition">Clear</button>
+            </div>
+        </div>
+
+        <!-- Column 3: Scoreboard and Chat -->
+        <div class="lg:col-span-1 flex flex-col space-y-6">
+
+            <!-- Scoreboard -->
+            <div class="bg-white p-4 rounded-xl shadow-md flex-none">
+                <h3 class="text-xl font-bold text-gray-800 border-b pb-2 mb-2">Scoreboard</h3>
+                <p class="text-sm text-gray-500 mb-2">Drawer: <span id="game-info-drawer" class="font-semibold">...</span> | Round: <span id="game-info-round" class="font-semibold">0</span></p>
+                <ul id="player-list" class="max-h-56 overflow-y-auto">
+                    <!-- Players rendered by JS -->
+                </ul>
+            </div>
+
+            <!-- Chat / Guessing Area -->
+            <div class="bg-white p-4 rounded-xl shadow-md flex-grow flex flex-col min-h-64">
+                <h3 class="text-xl font-bold text-gray-800 border-b pb-2 mb-2">Guesses (Chat)</h3>
+                <div id="chat-box" class="flex-grow overflow-y-auto space-y-1 mb-4 text-sm">
+                    <!-- Guesses rendered by JS -->
+                </div>
+
+                <div id="guessing-area" class="flex space-x-2 flex-none">
+                    <input type="text" id="guess-input" placeholder="Type your guess here..." class="flex-grow p-2 border border-gray-300 rounded-lg focus:ring-emerald-500 focus:border-emerald-500">
+                    <button id="guess-btn" class="bg-emerald-500 text-white p-2 rounded-lg hover:bg-emerald-600 transition">Guess</button>
+                </div>
+
+                <p id="guess-info" class="text-xs text-gray-500 mt-2">First correct guess wins the round!</p>
+            </div>
+
+            <!-- Host Controls -->
+            <div id="host-game-controls" class="hidden bg-red-100 p-3 rounded-lg border-l-4 border-red-400">
+                <h4 class="font-semibold text-red-700">Game Manager</h4>
+                <button id="stop-game-btn" class="bg-red-500 text-white p-2 rounded-lg hover:bg-red-600 transition mt-2 w-full">Stop Game (End Session)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Term Selection (Drawer only) -->
+    <div id="term-selection-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+        <div class="bg-white p-8 rounded-xl shadow-2xl max-w-md w-full text-center">
+            <h3 class="text-2xl font-bold text-blue-600 mb-4">Choose a Term to Draw</h3>
+            <p class="text-gray-600 mb-6">Select the term you feel most confident drawing in 30 seconds.</p>
+            <div id="term-options" class="space-y-3">
+                <!-- Buttons rendered by JS -->
+            </div>
+        </div>
+    </div>
+</body>
+</html>
